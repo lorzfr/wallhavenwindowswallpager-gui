@@ -68,6 +68,10 @@ $script:TextMutedOnDarkColor = [System.Drawing.ColorTranslator]::FromHtml('#BED1
 $script:NeutralColor = [System.Drawing.ColorTranslator]::FromHtml('#75A5B4')
 $script:SuccessColor = [System.Drawing.ColorTranslator]::FromHtml('#57B874')
 $script:ErrorColor = [System.Drawing.ColorTranslator]::FromHtml('#D35B5B')
+$script:DisabledButtonBackColor = [System.Drawing.ColorTranslator]::FromHtml('#D7E2DE')
+$script:DisabledButtonForeColor = [System.Drawing.ColorTranslator]::FromHtml('#86938E')
+$script:DisabledButtonBorderColor = [System.Drawing.ColorTranslator]::FromHtml('#C1CEC8')
+$script:HttpClient = $null
 
 function Get-DefaultConfig {
     return [pscustomobject]@{
@@ -126,10 +130,15 @@ function Initialize-CacheDirectory {
 }
 
 function New-HttpClient {
+    if ($script:HttpClient -ne $null) {
+        return $script:HttpClient
+    }
+
     $client = [System.Net.Http.HttpClient]::new()
     $client.Timeout = [TimeSpan]::FromSeconds(30)
     $client.DefaultRequestHeaders.UserAgent.ParseAdd('WallpaperPuller/1.0')
-    return $client
+    $script:HttpClient = $client
+    return $script:HttpClient
 }
 
 function Get-SafePropertyValue {
@@ -208,9 +217,9 @@ function Update-ActionButtons {
         $NewPictureButton.FlatAppearance.MouseDownBackColor = $script:AccentBluePressedColor
     }
     else {
-        $NewPictureButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#D7E2DE')
-        $NewPictureButton.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#86938E')
-        $NewPictureButton.FlatAppearance.BorderColor = [System.Drawing.ColorTranslator]::FromHtml('#C1CEC8')
+        $NewPictureButton.BackColor = $script:DisabledButtonBackColor
+        $NewPictureButton.ForeColor = $script:DisabledButtonForeColor
+        $NewPictureButton.FlatAppearance.BorderColor = $script:DisabledButtonBorderColor
     }
 
     if ($SetWallpaperButton.Enabled) {
@@ -221,9 +230,9 @@ function Update-ActionButtons {
         $SetWallpaperButton.FlatAppearance.MouseDownBackColor = $script:AccentGreenPressedColor
     }
     else {
-        $SetWallpaperButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#D7E2DE')
-        $SetWallpaperButton.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#86938E')
-        $SetWallpaperButton.FlatAppearance.BorderColor = [System.Drawing.ColorTranslator]::FromHtml('#C1CEC8')
+        $SetWallpaperButton.BackColor = $script:DisabledButtonBackColor
+        $SetWallpaperButton.ForeColor = $script:DisabledButtonForeColor
+        $SetWallpaperButton.FlatAppearance.BorderColor = $script:DisabledButtonBorderColor
     }
 }
 
@@ -325,13 +334,13 @@ function Get-RandomWallpaper {
     )
 
     $client = New-HttpClient
+    $response = $client.GetAsync($ApiUrl).GetAwaiter().GetResult()
     try {
-        $response = $client.GetAsync($ApiUrl).GetAwaiter().GetResult()
         $null = $response.EnsureSuccessStatusCode()
         $payload = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
     }
     finally {
-        $client.Dispose()
+        $response.Dispose()
     }
 
     $items = @((Get-SafePropertyValue -Object $payload -Name 'data'))
@@ -391,8 +400,8 @@ function Save-WallpaperToCache {
     }
 
     $client = New-HttpClient
+    $response = $client.GetAsync($wallpaperUri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
     try {
-        $response = $client.GetAsync($wallpaperUri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         $null = $response.EnsureSuccessStatusCode()
 
         $responseStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
@@ -408,12 +417,12 @@ function Save-WallpaperToCache {
         finally {
             $responseStream.Dispose()
         }
-
-        Move-Item -LiteralPath $temporaryPath -Destination $destination -Force
     }
     finally {
-        $client.Dispose()
+        $response.Dispose()
     }
+
+    Move-Item -LiteralPath $temporaryPath -Destination $destination -Force
 
     return $destination
 }
@@ -824,10 +833,22 @@ $MainForm.Add_Shown({ Load-NewWallpaper })
 
 if ($SmokeTest) {
     Initialize-CacheDirectory
+    if ($script:HttpClient -ne $null) {
+        $script:HttpClient.Dispose()
+        $script:HttpClient = $null
+    }
     Write-Output 'Smoke test passed.'
     return
 }
 
-[void]$MainForm.ShowDialog()
+try {
+    [void]$MainForm.ShowDialog()
+}
+finally {
+    if ($script:HttpClient -ne $null) {
+        $script:HttpClient.Dispose()
+        $script:HttpClient = $null
+    }
+}
 
 
